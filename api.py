@@ -222,9 +222,10 @@ def chat_completion():
     
     # 检测response_text是为token失效,重新获取token并重新请求
     # Detect response_text is token expired, refresh token and request again
-    if response_text == {"detail":"Invalid token: Signature verification failed."}:
+    if response_text == {"detail":"Token time expired: expired_token: The token is expired"}:
         refresh_auth_token()
         response_text = get_response(user_input, system_prompt, assistant_last_response)
+        
     final_output = parse_response(response_text)
     
     return jsonify({
