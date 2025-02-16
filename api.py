@@ -5,6 +5,7 @@ import time
 import random
 import string
 import configparser
+import chardet
 
 app = Flask(__name__)
 
@@ -23,8 +24,14 @@ def initaliaze():
     global Ft_username
     global Ft_password
     global API_KEY
+
+    with open('config.ini', 'rb') as f:
+        result = chardet.detect(f.read())
+        encoding = result['encoding']
+
     config = configparser.ConfigParser()
-    config.read('config.ini')
+    config.read('config.ini', encoding=encoding)
+
     Ft_username = config.get('Main', 'username')
     Ft_password = config.get('Main', 'password')
     API_KEY = config.get('Main', 'api_key')
