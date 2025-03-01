@@ -7,10 +7,23 @@ import string
 import configparser
 import chardet
 
+"""
+Fitten Code API Server
+
+这是一个Flask应用，用于提供Fitten Code API服务。主要功能包括：
+1. 配置管理：从config.ini读取配置信息
+2. 认证管理：处理Fitten Code的登录认证和token刷新
+3. API接口：提供模型信息和聊天完成接口
+
+This is a Flask application that provides Fitten Code API service. Main features include:
+1. Configuration Management: Read configuration from config.ini
+2. Authentication Management: Handle Fitten Code login authentication and token refresh
+3. API Interface: Provide model information and chat completion interface
+"""
+
 app = Flask(__name__)
 
-# 初始化变量
-# Initialize variables
+# 全局变量 / Global variables
 Ft_username = '' 
 Ft_password = ''
 Ft_access_token = ''
@@ -18,12 +31,13 @@ Ft_refresh_token = ''
 Ft_user_id = ''
 API_KEY = ''
 
-def initaliaze():
-    # 初始化
-    # initaliaze
-    global Ft_username
-    global Ft_password
-    global API_KEY
+# ============ 配置管理 / Configuration Management ============
+
+def initialize():
+    """初始化配置，从config.ini读取必要的配置信息
+    Initialize configuration by reading necessary information from config.ini
+    """
+    global Ft_username, Ft_password, API_KEY
 
     with open('config.ini', 'rb') as f:
         result = chardet.detect(f.read())
@@ -37,13 +51,14 @@ def initaliaze():
     API_KEY = config.get('Main', 'api_key')
     get_auth_token()
     
+# ============ 认证管理 / Authentication Management ============
 
 def get_auth_token():
-    # 登录并获取相关信息
-    # Login and get related information
-    global Ft_access_token
-    global Ft_refresh_token
-    global Ft_user_id
+    """登录Fitten Code并获取认证token
+    Login to Fitten Code and get authentication token
+    """
+    global Ft_access_token, Ft_refresh_token, Ft_user_id
+
     login_url = 'https://fc.fittentech.com/codeuser/auth/login'
     login_headers = {
         "Accept": "*/*",
@@ -81,12 +96,12 @@ def get_auth_token():
         raise Exception(f"Failed to get auth token: {response.status_code}, {response.text}")
 
 def refresh_auth_token():
-    # 刷新Fittentech auth token
-    # Refresh Fittentech auth token
-    global Ft_access_token
-    global Ft_refresh_token
+    """刷新认证token
+    Refresh authentication token
+    """
+    global Ft_access_token, Ft_refresh_token
 
-    api_url = f'https://fc.fittentech.com/codeuser/auth/refresh_access_token'
+    api_url = 'https://fc.fittentech.com/codeuser/auth/refresh_access_token'
     
     api_headers = {
         'Cache-Control': 'no-cache',
@@ -97,8 +112,8 @@ def refresh_auth_token():
         'Sec-Fetch-Mode': 'cors',
         'Sec-Fetch-Site': 'same-origin',
         'User-Agent': ('Mozilla/5.0 (Windows NT 10.0; Win64; x64) '
-                       'AppleWebKit/537.36 (KHTML, like Gecko) '
-                       'Chrome/128.0.0.0 Safari/537.36 Edg/128.0.0.0'),
+                      'AppleWebKit/537.36 (KHTML, like Gecko) '
+                      'Chrome/128.0.0.0 Safari/537.36 Edg/128.0.0.0'),
         'accept': '*/*',
         'accept-language': 'zh-CN,zh;q=0.9,en;q=0.8,en-GB;q=0.7,en-US;q=0.6',
         'authorization': f'Bearer {Ft_refresh_token}',
@@ -108,11 +123,11 @@ def refresh_auth_token():
         'sec-ch-ua-platform': '"Windows"'
     }
 
-    api_data = {}
     if not Ft_refresh_token:
         get_auth_token()
         return
-    response = requests.post(api_url, headers=api_headers, json=api_data)
+
+    response = requests.post(api_url, headers=api_headers, json={})
     
     if response.status_code == 200:
         response_data = response.json()
@@ -123,16 +138,32 @@ def refresh_auth_token():
     else:
         get_auth_token()
 
+# ============ API接口 / API Interface ============
 
 def generate_random_id(length=8):
-    # 生成一个指定长度的随机字符串，包含字母和数字。
-    # Generate a random string with specified length, containing letters and digits.
+    """生成指定长度的随机字符串ID
+    Generate a random string ID with specified length
+    
+    Args:
+        length (int): ID长度，默认为8 / ID length, default is 8
+    
+    Returns:
+        str: 随机生成的ID / Generated random ID
+    """
     return ''.join(random.choices(string.ascii_letters + string.digits, k=length))
 
 def get_response(user_input, system_prompt, assistant_last_response):
-    # 调用Fittentech的API获取响应
-    # Call Fittentech API to get response
-
+    """调用Fitten Code API获取响应
+    Call Fitten Code API to get response
+    
+    Args:
+        user_input (str): 用户输入 / User input
+        system_prompt (str): 系统提示 / System prompt
+        assistant_last_response (str): 助手上一次的回复 / Assistant's last response
+    
+    Returns:
+        Response: API响应对象 / API response object
+    """
     api_url = f'https://fc.fittentech.com/codeapi/chat_auth?apikey={Ft_user_id}'
     
     api_headers = {
@@ -144,8 +175,8 @@ def get_response(user_input, system_prompt, assistant_last_response):
         'Sec-Fetch-Mode': 'cors',
         'Sec-Fetch-Site': 'same-origin',
         'User-Agent': ('Mozilla/5.0 (Windows NT 10.0; Win64; x64) '
-                       'AppleWebKit/537.36 (KHTML, like Gecko) '
-                       'Chrome/128.0.0.0 Safari/537.36 Edg/128.0.0.0'),
+                      'AppleWebKit/537.36 (KHTML, like Gecko) '
+                      'Chrome/128.0.0.0 Safari/537.36 Edg/128.0.0.0'),
         'accept': '*/*',
         'accept-language': 'zh-CN,zh;q=0.9,en;q=0.8,en-GB;q=0.7,en-US;q=0.6',
         'authorization': f'Bearer {Ft_access_token}',
@@ -160,12 +191,18 @@ def get_response(user_input, system_prompt, assistant_last_response):
         "ft_token": Ft_user_id,
     }
 
-    response = requests.post(api_url, headers=api_headers, json=api_data)
-    return response.text
+    return requests.post(api_url, headers=api_headers, json=api_data)
 
 def parse_response(response_text):
-    # 解析Fittentech的API返回的响应
-    # Parse Fittentech API response
+    """解析API响应文本
+    Parse API response text
+    
+    Args:
+        response_text (str): API响应文本 / API response text
+    
+    Returns:
+        str: 解析后的输出文本 / Parsed output text
+    """
     output_sentence = []
     for line in response_text.splitlines():
         try:
@@ -178,8 +215,12 @@ def parse_response(response_text):
 
 @app.route('/v1/models')
 def models():
-    # 返回模型信息
-    # Return model information
+    """返回支持的模型信息
+    Return supported model information
+    
+    Returns:
+        Response: 模型信息的JSON响应 / JSON response containing model information
+    """
     return jsonify({
         "models": [
             {
@@ -191,21 +232,24 @@ def models():
 
 @app.route('/v1/chat/completions', methods=['POST'])
 def chat_completion():
-    # 聊天接口
-    # Chat interface
+    """处理聊天完成请求
+    Handle chat completion request
+    
+    Returns:
+        Response: 聊天完成的JSON响应 / JSON response for chat completion
+    """
+    # 验证API密钥 / Verify API key
     api_key = request.headers.get('Authorization')
     if api_key != f'Bearer {API_KEY}':
         return jsonify({"error": "Unauthorized access. Invalid API Key."}), 401
     
     data = request.json
-
     messages = data.get('messages', [])
     
     if not messages or not isinstance(messages, list):
         return jsonify({"error": "Invalid input"}), 400
 
-    # 初始化变量
-    # Initialize variables
+    # 提取消息内容 / Extract message content
     user_input = ''
     system_prompt = ''
     model = ''
@@ -225,16 +269,18 @@ def chat_completion():
     if not user_input:
         return jsonify({"error": "User input not found"}), 400
 
-    response_text = get_response(user_input, system_prompt, assistant_last_response)
+    # 获取API响应 / Get API response
+    response = get_response(user_input, system_prompt, assistant_last_response)
     
-    # 检测response_text是为token失效,重新获取token并重新请求
-    # Detect response_text is token expired, refresh token and request again
-    if response_text == {"detail":"Token time expired: expired_token: The token is expired"}:
-        refresh_auth_token()
-        response_text = get_response(user_input, system_prompt, assistant_last_response)
-        
-    final_output = parse_response(response_text)
+    # 处理token过期情况 / Handle token expiration
+    if response.status_code == 401:
+        if response.json().get("detail") == "Token time expired: expired_token: The token is expired":
+            refresh_auth_token()
+            response = get_response(user_input, system_prompt, assistant_last_response)
     
+    final_output = parse_response(response.text)
+    
+    # 返回格式化的响应 / Return formatted response
     return jsonify({
         "id": generate_random_id(),
         "object": "chat.completion",
@@ -251,5 +297,5 @@ def chat_completion():
     })
 
 if __name__ == "__main__":
-    initaliaze()
+    initialize()
     app.run(host='0.0.0.0', port=5000)
