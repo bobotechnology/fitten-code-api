@@ -1,6 +1,6 @@
 # MIT License
 
-English | [简体中文](https://github.com/bobotechnology/fitten-code-api/blob/master/LICENSE_CN.md)
+English | [简体中文](https://github.com/bobotechnology/fitten-code-api/blob/main/LICENSE_CN.md)
 
 ## Copyright
 Copyright (c) [2025] [bobotechnology]

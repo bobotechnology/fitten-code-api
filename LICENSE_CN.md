@@ -1,6 +1,6 @@
 # MIT许可证
 
-[English](https://github.com/bobotechnology/fitten-code-api/blob/master/LICENSE.md) | 简体中文
+[English](https://github.com/bobotechnology/fitten-code-api/blob/main/LICENSE.md) | 简体中文
 
 ## 版权声明
 版权所有 (c) [2025] [bobotechnology]
