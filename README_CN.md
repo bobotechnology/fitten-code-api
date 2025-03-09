@@ -1,6 +1,6 @@
 # Fitten Code API Server
 
-[English](https://github.com/bobotechnology/fitten-code-api/blob/master/README.md) | 简体中文
+[English](https://github.com/bobotechnology/fitten-code-api/blob/main/README.md) | 简体中文
 
 ### 简介
 Fitten Code API Server 是一个基于 Flask 的应用程序，为 Fitten Code 提供 API 服务。它作为客户端和 Fitten Code 服务之间的中间件，提供类似 OpenAI API 格式的标准化 API 接口。
