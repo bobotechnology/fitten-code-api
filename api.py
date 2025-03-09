@@ -1,4 +1,4 @@
-from flask import Flask, request, jsonify
+from flask import Flask, request, jsonify, Response, stream_with_context
 import requests
 import json
 import time
@@ -152,7 +152,7 @@ def generate_random_id(length=8):
     """
     return ''.join(random.choices(string.ascii_letters + string.digits, k=length))
 
-def get_response(user_input, system_prompt, assistant_last_response):
+def get_response(user_input, system_prompt, assistant_last_response, stream=False):
     """调用Fitten Code API获取响应
     Call Fitten Code API to get response
     
@@ -160,6 +160,7 @@ def get_response(user_input, system_prompt, assistant_last_response):
         user_input (str): 用户输入 / User input
         system_prompt (str): 系统提示 / System prompt
         assistant_last_response (str): 助手上一次的回复 / Assistant's last response
+        stream (bool): 是否使用流式响应 / Whether to use streaming response
     
     Returns:
         Response: API响应对象 / API response object
@@ -191,8 +192,7 @@ def get_response(user_input, system_prompt, assistant_last_response):
         "ft_token": Ft_user_id,
     }
 
-    return requests.post(api_url, headers=api_headers, json=api_data)
-
+    return requests.post(api_url, headers=api_headers, json=api_data, stream=stream)
 def parse_response(response_text):
     """解析API响应文本
     Parse API response text
@@ -245,6 +245,7 @@ def chat_completion():
     
     data = request.json
     messages = data.get('messages', [])
+    stream_mode = data.get('stream', True)  # 默认使用流式响应 / Default to stream mode
     
     if not messages or not isinstance(messages, list):
         return jsonify({"error": "Invalid input"}), 400
@@ -252,12 +253,11 @@ def chat_completion():
     # 提取消息内容 / Extract message content
     user_input = ''
     system_prompt = ''
-    model = ''
+    model = data.get('model', "fitten-code")
     assistant_last_response = ''
 
     for message in messages:
         role = message.get('role')
-        model = message.get('model', "fitten-code")
         content = message.get('content', '')
         if role == 'user':
             user_input = content
@@ -269,32 +269,114 @@ def chat_completion():
     if not user_input:
         return jsonify({"error": "User input not found"}), 400
 
-    # 获取API响应 / Get API response
-    response = get_response(user_input, system_prompt, assistant_last_response)
+    # 生成随机ID / Generate random ID
+    response_id = generate_random_id()
+    created_time = int(time.time())
+
+    # 流式模式 / Stream mode
+    if stream_mode:
+        def generate():
+            # 获取API响应 / Get API response
+            response = get_response(user_input, system_prompt, assistant_last_response, stream=True)
+            
+            # 处理token过期情况 / Handle token expiration
+            if response.status_code == 401:
+                try:
+                    detail = response.json().get("detail")
+                    if detail == "Token time expired: expired_token: The token is expired":
+                        refresh_auth_token()
+                        response = get_response(user_input, system_prompt, assistant_last_response, stream=True)
+                except:
+                    pass
+            
+            # 发送SSE头部信息 / Send SSE header information
+            header_data = {
+                "id": response_id,
+                "object": "chat.completion.chunk",
+                "created": created_time,
+                "model": model,
+                "choices": [{
+                    "index": 0,
+                    "delta": {
+                        "role": "assistant"
+                    },
+                    "finish_reason": None
+                }]
+            }
+            yield f"data: {json.dumps(header_data)}\n\n"
+            
+            # 处理流式响应 / Process streaming response
+            content_buffer = ""
+            for line in response.iter_lines():
+                if line:
+                    try:
+                        json_data = json.loads(line.decode('utf-8'))
+                        if 'delta' in json_data:
+                            delta = json_data['delta']
+                            content_buffer += delta
+                            chunk_data = {
+                                "id": response_id,
+                                "object": "chat.completion.chunk",
+                                "created": created_time,
+                                "model": model,
+                                "choices": [{
+                                    "index": 0,
+                                    "delta": {
+                                        "content": delta
+                                    },
+                                    "finish_reason": None
+                                }]
+                            }
+                            yield f"data: {json.dumps(chunk_data)}\n\n"
+                    except json.JSONDecodeError:
+                        pass
+            
+            # 发送结束标记 / Send end marker
+            response_data = {
+                "id": response_id,
+                "object": "chat.completion.chunk",
+                "created": created_time,
+                "model": model,
+                "choices": [{
+                    "index": 0,
+                    "delta": {},
+                    "finish_reason": "stop"
+                }]
+            }
+            yield f"data: {json.dumps(response_data)}\n\n"
+            
+            yield "data: [DONE]\n\n"
+        
+        return Response(stream_with_context(generate()), mimetype='text/event-stream')
     
-    # 处理token过期情况 / Handle token expiration
-    if response.status_code == 401:
-        if response.json().get("detail") == "Token time expired: expired_token: The token is expired":
-            refresh_auth_token()
-            response = get_response(user_input, system_prompt, assistant_last_response)
-    
-    final_output = parse_response(response.text)
-    
-    # 返回格式化的响应 / Return formatted response
-    return jsonify({
-        "id": generate_random_id(),
-        "object": "chat.completion",
-        "created": int(time.time()),
-        "model": model,
-        "choices": [{
-            "index": 0,
-            "message": {
-                "role": "assistant",
-                "content": final_output
-            },
-            "finish_reason": "stop"
-        }]
-    })
+    # 非流式模式 / Non-stream mode
+    else:
+        # 获取API响应 / Get API response
+        response = get_response(user_input, system_prompt, assistant_last_response)
+        
+        # 处理token过期情况 / Handle token expiration
+        if response.status_code == 401:
+            if response.json().get("detail") == "Token time expired: expired_token: The token is expired":
+                refresh_auth_token()
+                response = get_response(user_input, system_prompt, assistant_last_response)
+        
+        final_output = parse_response(response.text)
+        
+        # 返回格式化的响应 / Return formatted response
+        return jsonify({
+            "id": response_id,
+            "object": "chat.completion",
+            "created": created_time,
+            "model": model,
+            "choices": [{
+                "index": 0,
+                "message": {
+                    "role": "assistant",
+                    "content": final_output
+                },
+                "finish_reason": "stop"
+            }]
+        })
 
 if __name__ == "__main__":
     initialize()
