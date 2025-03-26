@@ -1,4 +1,4 @@
-from flask import Flask, request, jsonify, Response, stream_with_context
+from flask import Flask, request, jsonify, Response as FlaskResponse
 import requests
 import json
 import time
@@ -6,378 +6,460 @@ import random
 import string
 import configparser
 import chardet
+import logging
+import os
+from typing import Dict, Any, Generator, Optional, Tuple
 
-"""
-Fitten Code API Server
-
-这是一个Flask应用，用于提供Fitten Code API服务。主要功能包括：
-1. 配置管理：从config.ini读取配置信息
-2. 认证管理：处理Fitten Code的登录认证和token刷新
-3. API接口：提供模型信息和聊天完成接口
-
-This is a Flask application that provides Fitten Code API service. Main features include:
-1. Configuration Management: Read configuration from config.ini
-2. Authentication Management: Handle Fitten Code login authentication and token refresh
-3. API Interface: Provide model information and chat completion interface
-"""
+# 配置日志
+# Configure logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.StreamHandler(),
+        logging.FileHandler('fitten_api.log', encoding='utf-8')
+    ]
+)
+logger = logging.getLogger('fitten-code-api')
 
 app = Flask(__name__)
 
-# 全局变量 / Global variables
-Ft_username = '' 
-Ft_password = ''
-Ft_access_token = ''
-Ft_refresh_token = ''
-Ft_user_id = ''
-API_KEY = ''
 
-# ============ 配置管理 / Configuration Management ============
-
-def initialize():
-    """初始化配置，从config.ini读取必要的配置信息
-    Initialize configuration by reading necessary information from config.ini
-    """
-    global Ft_username, Ft_password, API_KEY
-
-    with open('config.ini', 'rb') as f:
-        result = chardet.detect(f.read())
-        encoding = result['encoding']
-
-    config = configparser.ConfigParser()
-    config.read('config.ini', encoding=encoding)
-
-    Ft_username = config.get('Main', 'username')
-    Ft_password = config.get('Main', 'password')
-    API_KEY = config.get('Main', 'api_key')
-    get_auth_token()
+class FittenAuth:
+    """处理Fitten Code认证相关功能的类
+    Class for handling Fitten Code authentication related functions"""
     
-# ============ 认证管理 / Authentication Management ============
+    def __init__(self):
+        self.username = ''
+        self.password = ''
+        self.access_token = ''
+        self.refresh_token = ''
+        self.user_id = ''
+        
+    def load_credentials(self, config: configparser.ConfigParser) -> None:
+        """从配置中加载凭证
+        Load credentials from configuration"""
+        self.username = config.get('Main', 'username')
+        self.password = config.get('Main', 'password')
+        
+        if not self.username or not self.password:
+            logger.error("Please set username and password in config.ini")
+            raise ValueError("Please set username and password in config.ini")
+            
+    def get_auth_token(self) -> bool:
+        """获取认证token
+        Get authentication token"""
+        login_url = 'https://fc.fittentech.com/codeuser/auth/login'
+        login_data = {
+            "username": self.username,
+            "password": self.password
+        }
+        
+        try:
+            response = requests.post(login_url, json=login_data, headers={
+                "Content-Type": "application/json"
+            })
+            
+            response.raise_for_status()
+            data = response.json()
+            
+            self.access_token = data["access_token"]
+            self.refresh_token = data["refresh_token"]
+            self.user_id = data["user_info"]["user_id"]
+            
+            logger.info(f"Authentication successful, user ID: {self.user_id}")
+            return True
+            
+        except requests.exceptions.RequestException as e:
+            logger.error(f"Failed to get token: {str(e)}")
+            if response and hasattr(response, 'text'):
+                logger.error(f"Response content: {response.text}")
+            return False
+            
+    def refresh_auth_token(self) -> bool:
+        """刷新token
+        Refresh authentication token"""
+        api_url = 'https://fc.fittentech.com/codeuser/auth/refresh_access_token'
+        
+        try:
+            response = requests.post(api_url, headers={
+                "Authorization": f"Bearer {self.refresh_token}",
+                "Content-Type": "application/json"
+            })
+            
+            if response.status_code == 200:
+                data = response.json()
+                self.access_token = data["access_token"]
+                self.refresh_token = data["refresh_token"]
+                logger.info("Token refreshed")
+                return True
+            else:
+                logger.warning(f"Failed to refresh token, attempting to login again, status code: {response.status_code}")
+                return self.get_auth_token()
+                
+        except requests.exceptions.RequestException as e:
+            logger.error(f"Failed to refresh token: {str(e)}")
+            return self.get_auth_token()
 
-def get_auth_token():
-    """登录Fitten Code并获取认证token
-    Login to Fitten Code and get authentication token
-    """
-    global Ft_access_token, Ft_refresh_token, Ft_user_id
 
-    login_url = 'https://fc.fittentech.com/codeuser/auth/login'
-    login_headers = {
-        "Accept": "*/*",
-        "Accept-Encoding": "gzip, deflate, br, zstd",
-        "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8,en-GB;q=0.7,en-US;q=0.6",
-        "Cache-Control": "no-cache",
-        "Connection": "keep-alive",
-        "Content-Type": "application/json",
-        "Host": "fc.fittentech.com",
-        "Origin": "https://fc.fittentech.com",
-        "Pragma": "no-cache",
-        "Referer": "https://fc.fittentech.com/",
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36 Edg/128.0.0.0",
-    }
-
-    login_data = {
-        "username": Ft_username,
-        "password": Ft_password
-    }
-
-    if not Ft_username or not Ft_password:
-        print("Please set your Fittentech username and password in config.ini")
-        exit()
+class ConfigManager:
+    """配置管理类
+    Configuration management class"""
     
-    response = requests.post(login_url, headers=login_headers, json=login_data)
+    def __init__(self, config_path: str = 'config.ini'):
+        self.config_path = config_path
+        self.config = configparser.ConfigParser()
+        self.api_key = ''
+        self.auth = FittenAuth()
+        
+    def load_config(self) -> bool:
+        """加载配置文件
+        Load configuration file"""
+        try:
+            # 检测文件编码
+            if not os.path.exists(self.config_path):
+                logger.error(f"Configuration file does not exist: {self.config_path}")
+                return False
+                
+            with open(self.config_path, 'rb') as f:
+                encoding = chardet.detect(f.read())['encoding']
+            
+            self.config.read(self.config_path, encoding=encoding)
+            
+            # 加载API密钥
+            self.api_key = self.config.get('Main', 'api_key')
+            if not self.api_key:
+                logger.warning("API key not set, client will not be able to access the API")
+                
+            # 加载认证信息
+            self.auth.load_credentials(self.config)
+            
+            # 获取认证token
+            if not self.auth.get_auth_token():
+                return False
+                
+            return True
+            
+        except Exception as e:
+            logger.error(f"Failed to load configuration: {str(e)}")
+            return False
     
-    if response.status_code == 200:
-        response_data = response.json()
-        Ft_access_token = response_data.get("access_token")
-        Ft_refresh_token = response_data.get("refresh_token")
-        Ft_user_id = response_data.get("user_info", {}).get("user_id")
-        print(f"Auth token: {Ft_access_token}")
-        print(f"User ID: {Ft_user_id}")
-    else:
-        raise Exception(f"Failed to get auth token: {response.status_code}, {response.text}")
-
-def refresh_auth_token():
-    """刷新认证token
-    Refresh authentication token
-    """
-    global Ft_access_token, Ft_refresh_token
-
-    api_url = 'https://fc.fittentech.com/codeuser/auth/refresh_access_token'
+class FittenAPI:
+    """处理Fitten Code API请求的类
+    Class for handling Fitten Code API requests"""
     
-    api_headers = {
-        'Cache-Control': 'no-cache',
-        'Connection': 'keep-alive',
-        'Origin': 'https://fc.fittentech.com',
-        'Pragma': 'no-cache',
-        'Sec-Fetch-Dest': 'empty',
-        'Sec-Fetch-Mode': 'cors',
-        'Sec-Fetch-Site': 'same-origin',
-        'User-Agent': ('Mozilla/5.0 (Windows NT 10.0; Win64; x64) '
-                      'AppleWebKit/537.36 (KHTML, like Gecko) '
-                      'Chrome/128.0.0.0 Safari/537.36 Edg/128.0.0.0'),
-        'accept': '*/*',
-        'accept-language': 'zh-CN,zh;q=0.9,en;q=0.8,en-GB;q=0.7,en-US;q=0.6',
-        'authorization': f'Bearer {Ft_refresh_token}',
-        'content-type': 'application/json',
-        'sec-ch-ua': '"Chromium";v="128", "Not;A=Brand";v="24", "Microsoft Edge";v="128"',
-        'sec-ch-ua-mobile': '?0',
-        'sec-ch-ua-platform': '"Windows"'
-    }
+    def __init__(self, auth: FittenAuth):
+        self.auth = auth
+        self.base_url = 'https://fc.fittentech.com/codeapi'
+        self.user_agent = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36 Edg/128.0.0.0'
+        
+    def get_chat_response(self, user_input: str, system_prompt: str = '', assistant_last_response: str = '') -> requests.Response:
+        """获取API响应（流式）
+        Get API response (streaming)
+        
+        Args:
+            user_input: 用户输入的文本 (User input text)
+            system_prompt: 系统提示词 (System prompt)
+            assistant_last_response: 助手上一次的回复 (Assistant's last response)
+            
+        Returns:
+            requests.Response: 流式响应对象 (Streaming response object)
+        """
+        api_url = f'{self.base_url}/chat_auth?apikey={self.auth.user_id}'
+        
+        headers = {
+            'Authorization': f'Bearer {self.auth.access_token}',
+            'Content-Type': 'application/json',
+            'User-Agent': self.user_agent
+        }
 
-    if not Ft_refresh_token:
-        get_auth_token()
-        return
+        data = {
+            "inputs": f"<|system|>\n{system_prompt}\n<|end|>\n<|user|>\n{user_input}\n<|end|>\n<|assistant|>\n{assistant_last_response}\n",
+            "ft_token": self.auth.user_id,
+        }
 
-    response = requests.post(api_url, headers=api_headers, json={})
-    
-    if response.status_code == 200:
-        response_data = response.json()
-        Ft_access_token = response_data.get("access_token")
-        Ft_refresh_token = response_data.get("refresh_token")
-        print("Refresh success.")
-        print(f"Auth token: {Ft_access_token}")
-    else:
-        get_auth_token()
+        try:
+            return requests.post(api_url, headers=headers, json=data, stream=True)
+        except requests.exceptions.RequestException as e:
+            logger.error(f"API request failed: {str(e)}")
+            raise
+            
+    def process_stream_response(self, response: requests.Response, req_id: str, model: str) -> Generator[str, None, None]:
+        """处理流式响应
+        Process streaming response
+        
+        Args:
+            response: 流式响应对象 (Streaming response object)
+            req_id: 请求ID (Request ID)
+            model: 模型名称 (Model name)
+            
+        Yields:
+            str: 格式化的响应行 (Formatted response line)
+        """
+        if response.status_code != 200:
+            error_msg = "Unknown error"
+            try:
+                error_data = response.json()
+                error_msg = error_data.get("detail", "Internal Server Error")
+            except:
+                if hasattr(response, 'text'):
+                    error_msg = response.text
+                    
+            yield f"data: {json.dumps({'error': {'message': error_msg, 'type': 'api_error', 'code': 'api_error'}})}\n\n"
+            return
+            
+        for line in response.iter_lines():
+            if not line:
+                continue
+                
+            try:
+                data = json.loads(line.decode('utf-8'))
+                if 'delta' in data:
+                    finish_reason = data.get('finish_reason')
+                    chunk = {
+                        "id": req_id,
+                        "object": "chat.completion.chunk",
+                        "created": int(time.time()),
+                        "model": model,
+                        "choices": [{
+                            "delta": {"content": data['delta']},
+                            "index": 0,
+                            "finish_reason": finish_reason
+                        }]
+                    }
+                    yield f"data: {json.dumps(chunk)}\n\n"
+            except json.JSONDecodeError as e:
+                logger.warning(f"Failed to parse response line: {str(e)}")
+                continue
+            except Exception as e:
+                logger.error(f"Error processing response line: {str(e)}")
+                yield f"data: {json.dumps({'error': {'message': str(e), 'type': 'internal_error', 'code': 'internal_error'}})}\n\n"
+                return
+                
+        yield "data: [DONE]\n\n"
 
-# ============ API接口 / API Interface ============
 
-def generate_random_id(length=8):
-    """生成指定长度的随机字符串ID
-    Generate a random string ID with specified length
+def generate_random_id(length: int = 8) -> str:
+    """生成随机ID
+    Generate random ID
     
     Args:
-        length (int): ID长度，默认为8 / ID length, default is 8
-    
+        length: ID长度 (ID length)
+        
     Returns:
-        str: 随机生成的ID / Generated random ID
+        str: 随机生成的ID (Randomly generated ID)
     """
     return ''.join(random.choices(string.ascii_letters + string.digits, k=length))
 
-def get_response(user_input, system_prompt, assistant_last_response, stream=False):
-    """调用Fitten Code API获取响应
-    Call Fitten Code API to get response
+class APIRoutes:
+    """API路由处理类
+    API routes handling class"""
     
-    Args:
-        user_input (str): 用户输入 / User input
-        system_prompt (str): 系统提示 / System prompt
-        assistant_last_response (str): 助手上一次的回复 / Assistant's last response
-        stream (bool): 是否使用流式响应 / Whether to use streaming response
-    
-    Returns:
-        Response: API响应对象 / API response object
-    """
-    api_url = f'https://fc.fittentech.com/codeapi/chat_auth?apikey={Ft_user_id}'
-    
-    api_headers = {
-        'Cache-Control': 'no-cache',
-        'Connection': 'keep-alive',
-        'Origin': 'https://fc.fittentech.com',
-        'Pragma': 'no-cache',
-        'Sec-Fetch-Dest': 'empty',
-        'Sec-Fetch-Mode': 'cors',
-        'Sec-Fetch-Site': 'same-origin',
-        'User-Agent': ('Mozilla/5.0 (Windows NT 10.0; Win64; x64) '
-                      'AppleWebKit/537.36 (KHTML, like Gecko) '
-                      'Chrome/128.0.0.0 Safari/537.36 Edg/128.0.0.0'),
-        'accept': '*/*',
-        'accept-language': 'zh-CN,zh;q=0.9,en;q=0.8,en-GB;q=0.7,en-US;q=0.6',
-        'authorization': f'Bearer {Ft_access_token}',
-        'content-type': 'application/json',
-        'sec-ch-ua': '"Chromium";v="128", "Not;A=Brand";v="24", "Microsoft Edge";v="128"',
-        'sec-ch-ua-mobile': '?0',
-        'sec-ch-ua-platform': '"Windows"'
-    }
-
-    api_data = {
-        "inputs": f"<|system|>\n{system_prompt}\n<|end|>\n<|user|>\n{user_input}\n<|end|>\n<|assistant|>\n{assistant_last_response}\n",
-        "ft_token": Ft_user_id,
-    }
-
-    return requests.post(api_url, headers=api_headers, json=api_data, stream=stream)
-def parse_response(response_text):
-    """解析API响应文本
-    Parse API response text
-    
-    Args:
-        response_text (str): API响应文本 / API response text
-    
-    Returns:
-        str: 解析后的输出文本 / Parsed output text
-    """
-    output_sentence = []
-    for line in response_text.splitlines():
-        try:
-            json_data = json.loads(line)
-            if 'delta' in json_data:
-                output_sentence.append(json_data['delta'])
-        except json.JSONDecodeError:
-            pass
-    return ''.join(output_sentence)
-
-@app.route('/v1/models')
-def models():
-    """返回支持的模型信息
-    Return supported model information
-    
-    Returns:
-        Response: 模型信息的JSON响应 / JSON response containing model information
-    """
-    return jsonify({
-        "models": [
-            {
-                "id": "fitten-code",
-                "name": "Fitten Code"
-            }
-        ]
-    })
-
-@app.route('/v1/chat/completions', methods=['POST'])
-def chat_completion():
-    """处理聊天完成请求
-    Handle chat completion request
-    
-    Returns:
-        Response: 聊天完成的JSON响应 / JSON response for chat completion
-    """
-    # 验证API密钥 / Verify API key
-    api_key = request.headers.get('Authorization')
-    if api_key != f'Bearer {API_KEY}':
-        return jsonify({"error": "Unauthorized access. Invalid API Key."}), 401
-    
-    data = request.json
-    messages = data.get('messages', [])
-    stream_mode = data.get('stream', True)  # 默认使用流式响应 / Default to stream mode
-    
-    if not messages or not isinstance(messages, list):
-        return jsonify({"error": "Invalid input"}), 400
-
-    # 提取消息内容 / Extract message content
-    user_input = ''
-    system_prompt = ''
-    model = data.get('model', "fitten-code")
-    assistant_last_response = ''
-
-    for message in messages:
-        role = message.get('role')
-        content = message.get('content', '')
-        if role == 'user':
-            user_input = content
-        elif role == 'system':
-            system_prompt = content
-        elif role == 'assistant':
-            assistant_last_response = content
-
-    if not user_input:
-        return jsonify({"error": "User input not found"}), 400
-
-    # 生成随机ID / Generate random ID
-    response_id = generate_random_id()
-    created_time = int(time.time())
-
-    # 流式模式 / Stream mode
-    if stream_mode:
-        def generate():
-            # 获取API响应 / Get API response
-            response = get_response(user_input, system_prompt, assistant_last_response, stream=True)
-            
-            # 处理token过期情况 / Handle token expiration
-            if response.status_code == 401:
-                try:
-                    detail = response.json().get("detail")
-                    if detail == "Token time expired: expired_token: The token is expired":
-                        refresh_auth_token()
-                        response = get_response(user_input, system_prompt, assistant_last_response, stream=True)
-                except:
-                    pass
-            
-            # 发送SSE头部信息 / Send SSE header information
-            header_data = {
-                "id": response_id,
-                "object": "chat.completion.chunk",
-                "created": created_time,
-                "model": model,
-                "choices": [{
-                    "index": 0,
-                    "delta": {
-                        "role": "assistant"
-                    },
-                    "finish_reason": None
-                }]
-            }
-            yield f"data: {json.dumps(header_data)}\n\n"
-            
-            # 处理流式响应 / Process streaming response
-            content_buffer = ""
-            for line in response.iter_lines():
-                if line:
-                    try:
-                        json_data = json.loads(line.decode('utf-8'))
-                        if 'delta' in json_data:
-                            delta = json_data['delta']
-                            content_buffer += delta
-                            chunk_data = {
-                                "id": response_id,
-                                "object": "chat.completion.chunk",
-                                "created": created_time,
-                                "model": model,
-                                "choices": [{
-                                    "index": 0,
-                                    "delta": {
-                                        "content": delta
-                                    },
-                                    "finish_reason": None
-                                }]
-                            }
-                            yield f"data: {json.dumps(chunk_data)}\n\n"
-                    except json.JSONDecodeError:
-                        pass
-            
-            # 发送结束标记 / Send end marker
-            response_data = {
-                "id": response_id,
-                "object": "chat.completion.chunk",
-                "created": created_time,
-                "model": model,
-                "choices": [{
-                    "index": 0,
-                    "delta": {},
-                    "finish_reason": "stop"
-                }]
-            }
-            yield f"data: {json.dumps(response_data)}\n\n"
-            
-            yield "data: [DONE]\n\n"
+    def __init__(self, app: Flask, config_manager: ConfigManager, fitten_api: FittenAPI):
+        self.app = app
+        self.config_manager = config_manager
+        self.fitten_api = fitten_api
+        self.register_routes()
         
-        return Response(stream_with_context(generate()), mimetype='text/event-stream')
-    
-    # 非流式模式 / Non-stream mode
-    else:
-        # 获取API响应 / Get API response
-        response = get_response(user_input, system_prompt, assistant_last_response)
+    def register_routes(self) -> None:
+        """注册所有路由
+        Register all routes"""
+        self.app.route('/v1/models')(self.models)
+        self.app.route('/v1/chat/completions', methods=['POST'])(self.chat_completion)
         
-        # 处理token过期情况 / Handle token expiration
-        if response.status_code == 401:
-            if response.json().get("detail") == "Token time expired: expired_token: The token is expired":
-                refresh_auth_token()
-                response = get_response(user_input, system_prompt, assistant_last_response)
-        
-        final_output = parse_response(response.text)
-        
-        # 返回格式化的响应 / Return formatted response
+    def models(self):
+        """获取可用模型列表
+        Get available models list"""
         return jsonify({
-            "id": response_id,
-            "object": "chat.completion",
-            "created": created_time,
-            "model": model,
-            "choices": [{
-                "index": 0,
-                "message": {
-                    "role": "assistant",
-                    "content": final_output
-                },
-                "finish_reason": "stop"
-            }]
+            "models": [
+                {"id": "fitten-code", "name": "Fitten Code"}
+            ]
         })
+        
+    def validate_api_key(self) -> Tuple[bool, Optional[str]]:
+        """验证API密钥
+        Validate API key
+        
+        Returns:
+            Tuple[bool, Optional[str]]: (是否有效, 错误消息) (Whether valid, error message)
+        """
+        api_key = request.headers.get('Authorization')
+        if not api_key:
+            return False, "API key not provided"
+            
+        if api_key != f'Bearer {self.config_manager.api_key}':
+            return False, "Invalid API key"
+            
+        return True, None
+        
+    def parse_messages(self, data: Dict[str, Any]) -> Tuple[str, str, str, str]:
+        """解析消息数据
+        Parse message data
+        
+        Args:
+            data: 请求数据 (Request data)
+            
+        Returns:
+            Tuple[str, str, str, str]: (用户输入, 系统提示, 助手上一次回复, 模型名称) (User input, system prompt, assistant's last response, model name)
+        """
+        messages = data.get('messages', [])
+        
+        if not messages or not isinstance(messages, list):
+            raise ValueError("Invalid message format")
+            
+        user_input = ''
+        system_prompt = ''
+        model = 'fitten-code'
+        assistant_last_response = ''
+
+        for message in messages:
+            role = message.get('role')
+            content = message.get('content', '')
+            if role == 'user':
+                user_input = content
+            elif role == 'system':
+                system_prompt = content
+            elif role == 'assistant':
+                assistant_last_response = content
+            message_model = message.get('model')
+            if message_model:
+                model = message_model
+
+        if not user_input:
+            raise ValueError("User input not found")
+            
+        return user_input, system_prompt, assistant_last_response, model
+        
+    def chat_completion(self):
+        """流式处理接口
+        Streaming processing interface"""
+        # 验证API密钥
+        is_valid, error_msg = self.validate_api_key()
+        if not is_valid:
+            logger.warning(f"API key validation failed: {error_msg}")
+            return jsonify({"error": error_msg}), 401
+        
+        # 解析请求数据
+        try:
+            data = request.json
+            user_input, system_prompt, assistant_last_response, model = self.parse_messages(data)
+        except ValueError as e:
+            logger.warning(f"Failed to parse request data: {str(e)}")
+            return jsonify({"error": str(e)}), 400
+        except Exception as e:
+            logger.error(f"Error processing request data: {str(e)}")
+            return jsonify({
+                "error": {
+                    "message": "Internal server error",
+                    "type": "internal_server_error",
+                    "code": 500
+                }
+            }), 500
+        def generate():
+            req_id = generate_random_id()
+            max_retries = 2
+            retry_count = 0
+            
+            while retry_count < max_retries:
+                try:
+                    # 获取API响应
+                    response = self.fitten_api.get_chat_response(
+                        user_input, system_prompt, assistant_last_response
+                    )
+                    
+                    # 处理响应状态码
+                    if response.status_code == 200:
+                        # 处理流式响应
+                        yield from self.fitten_api.process_stream_response(response, req_id, model)
+                        return
+                    elif response.status_code == 401:
+                        # 刷新token并重试
+                        logger.info("Token expired, attempting to refresh")
+                        if self.config_manager.auth.refresh_auth_token():
+                            retry_count += 1
+                        else:
+                            yield f"data: {json.dumps({'error': {'message': 'Token refresh failed', 'type': 'server_error', 'code': 'token_refresh_error'}})}\n\n"
+                            return
+                    else:
+                        # 处理其他错误
+                        try:
+                            error_data = response.json()
+                            error_msg = error_data.get("detail", "Internal Server Error")
+                        except:
+                            error_msg = "Unknown error"
+                            if hasattr(response, 'text'):
+                                error_msg = response.text
+                                
+                        logger.error(f"API request failed: {error_msg}")
+                        yield f"data: {json.dumps({'error': {'message': error_msg, 'type': 'api_error', 'code': 'api_error'}})}\n\n"
+                        return
+                        
+                except requests.exceptions.RequestException as e:
+                    logger.error(f"Request exception: {str(e)}")
+                    yield f"data: {json.dumps({'error': {'message': f'Request Exception: {str(e)}', 'type': 'server_error', 'code': 'request_error'}})}\n\n"
+                    return
+                except Exception as e:
+                    logger.error(f"Error processing response: {str(e)}")
+                    yield f"data: {json.dumps({'error': {'message': str(e), 'type': 'internal_server_error', 'code': 'internal_server_error'}})}\n\n"
+                    return
+            
+            logger.warning("Maximum retry count reached")
+            yield f"data: {json.dumps({'error': {'message': 'Maximum retry count reached', 'type': 'server_error', 'code': 'max_retries_reached'}})}\n\n"
+        return FlaskResponse(generate(), mimetype='text/event-stream')
+
+class FittenCodeAPI:
+    """Fitten Code API主应用类
+    Fitten Code API main application class"""
+    
+    def __init__(self, config_path: str = 'config.ini'):
+        self.app = Flask(__name__)
+        self.config_manager = ConfigManager(config_path)
+        self.fitten_api = None
+        self.routes = None
+        
+    def initialize(self) -> bool:
+        """初始化应用
+        Initialize application
+        
+        Returns:
+            bool: 初始化是否成功 (Whether initialization is successful)
+        """
+        try:
+            # 加载配置
+            if not self.config_manager.load_config():
+                logger.error("Failed to load configuration, application cannot start")
+                return False
+                
+            # 初始化API客户端
+            self.fitten_api = FittenAPI(self.config_manager.auth)
+            
+            # 注册路由
+            self.routes = APIRoutes(self.app, self.config_manager, self.fitten_api)
+            
+            logger.info("Application initialized successfully")
+            return True
+            
+        except Exception as e:
+            logger.error(f"Error initializing application: {str(e)}")
+            return False
+            
+    def run(self, host: str = '0.0.0.0', port: int = 5000, debug: bool = False) -> None:
+        """运行应用
+        Run application
+        
+        Args:
+            host: 监听地址 (Listening address)
+            port: 监听端口 (Listening port)
+            debug: 是否启用调试模式 (Whether to enable debug mode)
+        """
+        if not self.initialize():
+            logger.error("Application initialization failed, cannot start")
+            return
+            
+        logger.info(f"Application started at http://{host}:{port}/")
+        self.app.run(host=host, port=port, debug=debug)
+
 
 if __name__ == "__main__":
-    initialize()
-    app.run(host='0.0.0.0', port=5000)
+    api = FittenCodeAPI()
+    api.run(port=5000)
