@@ -110,7 +110,6 @@ class FittenAuth:
                     data = response.json()  # 解析JSON响应 / Parse JSON response
                     # 更新令牌 / Update tokens
                     self.access_token = data["access_token"]
-                    self.refresh_token = data["refresh_token"]
                     logger.info("Token refreshed")
                     return True
                 else:
