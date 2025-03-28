@@ -13,6 +13,7 @@ Fitten Code API Server is a Flask-based application that provides API service fo
 - Built-in error handling and token expiration management
 - Logging system for debugging and monitoring
 - Secure API key authentication
+- Support for 128k context length
 
 ## Requirements
 - Python 3.x

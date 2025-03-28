@@ -13,6 +13,7 @@ Fitten Code API Server 是一个基于 Flask 的应用程序，为 Fitten Code �
 - 内置错误处理和令牌过期管理
 - 用于调试和监控的日志系统
 - 安全的 API 密钥认证
+- 支持128k上下文长度
 
 ## 环境要求
 - Python 3.x
