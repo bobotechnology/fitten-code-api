@@ -3,7 +3,7 @@
 English | [简体中文](https://github.com/bobotechnology/fitten-code-api/blob/main/README_CN.md)
 
 ## Introduction
-Fitten Code API Server is a Flask-based application that provides API service for Fitten Code. It acts as a middleware between clients and the Fitten Code service, offering a standardized API interface similar to OpenAI's API format. This server handles authentication, token management, and provides a clean interface for applications to interact with Fitten Code's capabilities.
+Fitten Code API Server is a FastAPI-based application that provides API service for Fitten Code. It acts as a middleware between clients and the Fitten Code service, offering a standardized API interface similar to OpenAI's API format. This server handles authentication, token management, and provides a clean interface for applications to interact with Fitten Code's capabilities.
 
 ## Features
 - Configuration management through config.ini
@@ -17,9 +17,11 @@ Fitten Code API Server is a Flask-based application that provides API service fo
 
 ## Requirements
 - Python 3.x
-- Flask
-- Requests
-- chardet
+- FastAPI
+- Uvicorn
+- httpx
+- Pydantic
+- configparser
 
 ## Installation
 1. Clone this repository
@@ -53,6 +55,11 @@ Fitten Code API Server is a Flask-based application that provides API service fo
    python api.py
    ```
    The server will run on `http://localhost:5000` by default
+   
+   Alternatively, you can use uvicorn directly:
+   ```bash
+   uvicorn api:app --host 0.0.0.0 --port 5000
+   ```
 
 2. API Endpoints:
    - `GET /v1/models`: List available models
@@ -62,7 +69,7 @@ Fitten Code API Server is a Flask-based application that provides API service fo
 
    **Regular Request:**
    ```python
-   import requests
+   import httpx
    import json
 
    url = "http://localhost:5000/v1/chat/completions"
@@ -74,16 +81,17 @@ Fitten Code API Server is a Flask-based application that provides API service fo
        "messages": [
            {"role": "system", "content": "You are a helpful assistant."},
            {"role": "user", "content": "Hello!"}
-       ]
+       ],
+       "stream": False
    }
 
-   response = requests.post(url, headers=headers, json=data)
+   response = httpx.post(url, headers=headers, json=data)
    print(json.dumps(response.json(), indent=2))
    ```
 
    **Streaming Request:**
    ```python
-   import requests
+   import httpx
    import json
 
    url = "http://localhost:5000/v1/chat/completions"
@@ -95,10 +103,11 @@ Fitten Code API Server is a Flask-based application that provides API service fo
        "messages": [
            {"role": "system", "content": "You are a helpful assistant."},
            {"role": "user", "content": "Write a short story."}
-       ]
+       ],
+       "stream": True
    }
 
-   with requests.post(url, headers=headers, json=data, stream=True) as response:
+   with httpx.stream('POST', url, headers=headers, json=data, timeout=None) as response:
        for line in response.iter_lines():
            if line:
                line_text = line.decode('utf-8')
@@ -120,6 +129,8 @@ Fitten Code API Server is a Flask-based application that provides API service fo
 ## Advanced Configuration
 
 The server creates a log file `fitten_api.log` in the project directory that contains detailed information about server operations, API requests, and errors. This can be useful for debugging.
+
+You can also customize the server port and host in the code or by using command line parameters with uvicorn.
 
 ## Error Handling
 

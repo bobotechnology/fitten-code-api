@@ -3,7 +3,7 @@
 [English](https://github.com/bobotechnology/fitten-code-api/blob/main/README.md) | 简体中文
 
 ## 简介
-Fitten Code API Server 是一个基于 Flask 的应用程序，为 Fitten Code 提供 API 服务。它作为客户端和 Fitten Code 服务之间的中间件，提供类似 OpenAI API 格式的标准化 API 接口。该服务器处理身份验证、令牌管理，并为应用程序提供一个简洁的接口来与 Fitten Code 的功能进行交互。
+Fitten Code API Server 是一个基于 FastAPI 的应用程序，为 Fitten Code 提供 API 服务。它作为客户端和 Fitten Code 服务之间的中间件，提供类似 OpenAI API 格式的标准化 API 接口。该服务器处理身份验证、令牌管理，并为应用程序提供一个简洁的接口来与 Fitten Code 的功能进行交互。
 
 ## 特性
 - 通过 config.ini 进行配置管理
@@ -17,9 +17,11 @@ Fitten Code API Server 是一个基于 Flask 的应用程序，为 Fitten Code �
 
 ## 环境要求
 - Python 3.x
-- Flask
-- Requests
-- chardet
+- FastAPI
+- Uvicorn
+- httpx
+- Pydantic
+- configparser
 
 ## 安装步骤
 1. 克隆此仓库
@@ -53,6 +55,11 @@ Fitten Code API Server 是一个基于 Flask 的应用程序，为 Fitten Code �
    python api.py
    ```
    服务器默认将在 `http://localhost:5000` 运行
+   
+   或者，您可以直接使用 uvicorn：
+   ```bash
+   uvicorn api:app --host 0.0.0.0 --port 5000
+   ```
 
 2. API 接口：
    - `GET /v1/models`：列出可用模型
@@ -62,7 +69,7 @@ Fitten Code API Server 是一个基于 Flask 的应用程序，为 Fitten Code �
 
    **常规请求：**
    ```python
-   import requests
+   import httpx
    import json
 
    url = "http://localhost:5000/v1/chat/completions"
@@ -74,16 +81,17 @@ Fitten Code API Server 是一个基于 Flask 的应用程序，为 Fitten Code �
        "messages": [
            {"role": "system", "content": "You are a helpful assistant."},
            {"role": "user", "content": "Hello!"}
-       ]
+       ],
+       "stream": False
    }
 
-   response = requests.post(url, headers=headers, json=data)
+   response = httpx.post(url, headers=headers, json=data)
    print(json.dumps(response.json(), indent=2))
    ```
 
    **流式请求：**
    ```python
-   import requests
+   import httpx
    import json
 
    url = "http://localhost:5000/v1/chat/completions"
@@ -95,10 +103,11 @@ Fitten Code API Server 是一个基于 Flask 的应用程序，为 Fitten Code �
        "messages": [
            {"role": "system", "content": "You are a helpful assistant."},
            {"role": "user", "content": "Write a short story."}
-       ]
+       ],
+       "stream": True
    }
 
-   with requests.post(url, headers=headers, json=data, stream=True) as response:
+   with httpx.stream('POST', url, headers=headers, json=data, timeout=None) as response:
        for line in response.iter_lines():
            if line:
                line_text = line.decode('utf-8')
@@ -120,6 +129,8 @@ Fitten Code API Server 是一个基于 Flask 的应用程序，为 Fitten Code �
 ## 高级配置
 
 服务器在项目目录中创建一个 `fitten_api.log` 日志文件，其中包含有关服务器操作、API 请求和错误的详细信息。这对调试非常有用。
+
+您还可以在代码中或使用 uvicorn 的命令行参数自定义服务器端口和主机。
 
 ## 错误处理
 
